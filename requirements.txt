@@ -1,0 +1,10 @@
+numpy
+pandas
+opencv-python
+torch
+torchvision
+ultralytics
+google-api-python-client
+google-auth
+matplotlib
+tqdm
