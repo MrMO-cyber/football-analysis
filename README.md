@@ -73,12 +73,6 @@ The script imports the required libraries:
   - Annotates the video with detections and AI-generated suggestions.
   - Saves the annotated video to the specified output file.
 
----
 
-### **4. Installation and Usage**
 
-#### **Installation**
-1. Clone the repository and navigate to the project directory.
-2. Install the required dependencies:
-   ```bash
-   pip install -r requirements.txt
+
