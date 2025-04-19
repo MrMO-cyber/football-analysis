@@ -4,7 +4,7 @@ from ultralytics import YOLO
 from google import genai  # Import the Google GenAI client
 
 # Initialize the GenAI client with your API key
-client = genai.Client(api_key="AIzaSyBw_NPX9ZBBcSG7_-oQXUrhOn0jJw8CkGo")  # Replace with your actual Google GenAI API key
+client = genai.Client(api_key="")  # Replace with your actual Google GenAI API key
 
 # Load YOLOv8 model for object detection
 model = YOLO("yolov8n.pt")  # Replace with your desired YOLOv8 model weights (e.g., yolov8s.pt)
