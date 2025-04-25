@@ -1,78 +1,110 @@
 # Football Analysis Project
+Overview
+This program is a video analysis tool built with Python, utilizing the YOLOv8 object detection model and an AI-powered question-answering system. The application provides the following functionalities:
 
-This project uses **YOLOv8** for object detection and **Google GenAI** (Gemini) for decision-making analysis in football matches. It processes football match footage, detects players and the ball, evaluates player decisions, and provides AI-generated suggestions for better gameplay strategies.
+Video Analysis: Detects objects (e.g., players, ball) in a football video and logs events.
+AI Interaction: Lets users ask questions about the video, and the AI generates concise answers based on the detected events.
+Graphical User Interface (GUI): A user-friendly interface built with Tkinter for video selection, processing, and interaction.
+Key Features
+YOLOv8 Object Detection:
 
----
+Detects objects like players and the ball in a football match video.
+Highlights detected objects with bounding boxes and labels.
+Identifies if a player is a goalkeeper based on their position in the penalty box.
+Event Logging:
 
-## **How the Code Works**
+Logs events like ball and player detections.
+Captures object locations, confidence levels, and dominant colors of objects.
+AI-Powered Summary:
 
-### **1. Objectives**
-- Detect players and the ball in a football match video.
-- Analyze player decisions (e.g., pass, dribble, shoot) using AI.
-- Provide suggestions for better gameplay strategies using Google's Generative AI.
+Allows users to ask natural language questions about the match (e.g., "How many times was the ball in the penalty area?").
+Utilizes Google Generative AI (gemini-1.5-flash) to generate answers based on logged events.
+Graphical User Interface (GUI):
 
----
+Video selection and playback.
+Start/stop video analysis.
+Progress bar to indicate analysis progress.
+Display of detection results and AI-generated summaries.
+Requirements
+Libraries Used
+Object Detection:
 
-### **2. Code Breakdown**
+ultralytics: For YOLOv8 model.
+opencv-python: For video processing and drawing bounding boxes.
+AI Integration:
 
-#### **Step 1: Import Libraries**
-The script imports the required libraries:
-- `cv2`: For video processing and frame display.
-- `numpy`: For mathematical operations like calculating distances.
-- `ultralytics`: For loading and using the YOLOv8 object detection model.
-- `google.genai`: For accessing Google's Generative AI services.
+google-generativeai: For generating natural language answers to user queries.
+GUI:
 
-#### **Step 2: Initialize Models**
-- **Google GenAI Client**: Initialized with an API key to access the Generative AI model (`gemini-2.0-flash`).
-- **YOLOv8 Model**: Pre-trained weights (`yolov8n.pt`) are loaded for object detection.
+tkinter: For the graphical user interface.
+Pillow: For rendering video frames in the GUI.
+Miscellaneous:
 
-#### **Step 3: Open Input Video**
-- The script opens the input video (`torres_missed.mp4`) using OpenCV.
-- It also sets up the output video configuration to save the annotated video.
+numpy: For array manipulations.
+collections.Counter: For calculating dominant object colors.
+Installation
+Install the required Python libraries using the following commands:
+"pip install ultralytics opencv-python google-generativeai Pillow numpy"
+Usage Instructions
+Run the Program:
+Execute the script:
+"python script.py"
+Select a Video:
+Click the "Browse Video" button to select a football match video.
+Supported formats: .mp4, .avi, .mov, .mkv.
+Start Analysis:
 
-#### **Step 4: Helper Functions**
-- **`get_center()`**: Calculates the center point of a bounding box.
-- **`analyze_decision()`**: Analyzes the closest player's decision based on:
-  - Ball position.
-  - Player position.
-  - Goal position.
-  - Number of nearby defenders.
-- **`generate_correction()`**: Sends a scenario description to the Google GenAI model and retrieves a suggested correction.
+Click the "Start Analysis & Summary" button.
+The program will:
+Detect objects in the video.
+Highlight objects and log events.
+Save the analyzed video as output_analysis.mp4.
+Ask Questions:
 
-#### **Step 5: Main Video Processing**
-- The script processes each frame of the video:
-  - **Object Detection**: YOLOv8 detects players (labeled as "person") and the ball (labeled as "sports ball").
-  - **Decision Analysis**:
-    - Finds the closest player to the ball.
-    - Analyzes their decision using the ball's position, player's position, and nearby defenders.
-    - Calls the Generative AI model to suggest a better alternative, if needed.
-  - **Annotations**:
-    - Draws bounding boxes around detected players and the ball.
-    - Displays the suggestion (correction) on the video frame.
+After analysis, click the "Ask AI" button.
+Enter a question about the match (e.g., "Where was the ball most frequently detected?").
+The AI will generate and display an answer based on the detected events.
+View Logs and Summaries:
 
-#### **Step 6: Save and Display Results**
-- Annotated video frames are saved to an output file (`output_analysis.mp4`).
-- The processed video is displayed in real-time, and the loop can be stopped by pressing the `q` key.
+The program provides a summary of detected events and allows you to view detailed logs.
+Code Structure
+1. Configuration
+Sets up the Google Generative AI API key.
+Loads the YOLOv8 model (yolov8l.pt).
+2. Core Functionalities
+Object Detection:
+get_center(box): Calculates the center of a bounding box.
+is_goalkeeper(box, frame_width, frame_height): Determines if a player is in the penalty box.
+get_dominant_color(frame, box): Identifies the dominant color of an object.
+Video Analysis:
+analyze_video(): Processes the video frame by frame:
+Detects objects using YOLOv8.
+Logs detected events.
+Displays frames in the GUI.
+AI Question Answering:
+ask_ai_question(): Prompts the user for a question.
+Sends a summary of logged events to the AI model.
+Displays the AI-generated answer.
+3. Graphical User Interface (GUI)
+Built using tkinter.
+Includes buttons for video selection, analysis, and AI interaction.
+Displays video frames and progress during analysis.
+Notes
+Google API Key:
 
----
+Replace the placeholder API key (GOOGLE_API_KEY) with a valid key.
+YOLO Model:
 
-### **3. Features**
-- **Object Detection**:
-  - YOLOv8 detects players and the ball in the video.
-  - Bounding boxes and labels are drawn for visual identification.
+Ensure the pre-trained YOLOv8 weights file (yolov8l.pt) is available.
+Performance:
 
-- **Decision Analysis**:
-  - Evaluates the closest player's decision based on:
-    - Position of the player.
-    - Ball's position.
-    - Goal's position.
-    - Number of nearby defenders.
-  - Calls Google's Generative AI (Gemini) to provide suggestions for better decision-making.
+The program skips frames (skip_frames = 1) to balance speed and accuracy.
+Error Handling:
 
-- **Video Output**:
-  - Annotates the video with detections and AI-generated suggestions.
-  - Saves the annotated video to the specified output file.
+The program includes error messages for common issues (e.g., invalid video files, missing API key).
+Future Enhancements
+Add support for real-time video analysis via webcam.
+Integrate advanced AI models for more detailed event recognition.
+Optimize performance for longer videos by parallelizing frame processing.
 
-
-
-
+This program provides a comprehensive platform for football video analysis, combining state-of-the-art object detection with AI-driven insights.
