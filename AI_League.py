@@ -1,143 +1,260 @@
 import cv2
 import numpy as np
 from ultralytics import YOLO
-from google import genai  # Import the Google GenAI client
+from google import generativeai as genai
+from collections import Counter
+import tkinter as tk
+from tkinter import filedialog, messagebox, simpledialog, ttk
+from tkinter.ttk import Progressbar
+from PIL import Image, ImageTk
+import os
 
-# Initialize the GenAI client with your API key
-client = genai.Client(api_key="")  # Replace with your actual Google GenAI API key
+# --- الإعدادات ---
+GOOGLE_API_KEY = "AIzaSyBw_NPX9ZBBcSG7_-oQXUrhOn0jJw8CkGo"  # استبدل بـ API Key الخاص بك
+if not GOOGLE_API_KEY or GOOGLE_API_KEY == "YOUR_API_KEY_HERE":
+    raise ValueError("API Key not set. Please replace 'YOUR_API_KEY_HERE' with your actual API key.")
 
-# Load YOLOv8 model for object detection
-model = YOLO("yolov8n.pt")  # Replace with your desired YOLOv8 model weights (e.g., yolov8s.pt)
+genai.configure(api_key=GOOGLE_API_KEY)
+GEMINI_MODEL_NAME = 'gemini-1.5-flash'
 
-# Open video
-video_path = r"C:\Users\ASUS\Downloads\torres_missed.mp4" # Replace with your video path
-cap = cv2.VideoCapture(video_path)
+# --- تحميل نموذج YOLOv8 ---
+try:
+    model_yolo = YOLO("yolov8l.pt")
+except Exception as e:
+    raise RuntimeError(f"Failed to load YOLO model: {e}")
 
-# Video output configuration
-frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-fps = int(cap.get(cv2.CAP_PROP_FPS))
-out = cv2.VideoWriter("output_analysis.mp4", cv2.VideoWriter_fourcc(*'mp4v'), fps, (frame_width, frame_height))
+# --- المتغيرات العامة ---
+video_path = None
+events_log = []
 
-# Configurable parameters
-DEFENDER_RADIUS = 100  # Radius to consider a player as a "nearby defender"
-GOAL_MARGIN_TOP = 50  # Goal position (distance from the top of the screen)
-
-# Helper function to calculate the center of a bounding box
+# --- دالة لحساب مركز المربع ---
 def get_center(box):
     x1, y1, x2, y2 = box
     return int((x1 + x2) / 2), int((y1 + y2) / 2)
 
-# Function to analyze player decisions
-def analyze_decision(ball_pos, players, frame):
-    if not players:
-        return "No players detected."
-    if not ball_pos:
-        return "Ball not detected. Focusing on player positions."
+# المتغيرات العامة
+video_path = None
+events_log = []
 
-    bx, by = ball_pos
+# دالة لتحديد ما إذا كان الكائن داخل منطقة الجزاء
+def is_goalkeeper(box, frame_width, frame_height):
+    x1, y1, x2, y2 = box
+    center_x, center_y = get_center((x1, y1, x2, y2))
+    
+    # افترض أن منطقة الجزاء هي 20% من العرض و30% من الطول السفلي
+    penalty_box_x_min = int(0.1 * frame_width)
+    penalty_box_x_max = int(0.9 * frame_width)
+    penalty_box_y_min = int(0.7 * frame_height)
+    penalty_box_y_max = frame_height
 
-    # Find the closest player to the ball
-    closest_player = None
-    min_distance = float('inf')
+    # إذا كان اللاعب داخل منطقة الجزاء
+    if penalty_box_x_min <= center_x <= penalty_box_x_max and penalty_box_y_min <= center_y <= penalty_box_y_max:
+        return True
+    return False
 
-    for player in players:
-        px, py = get_center(player)
-        dist = np.linalg.norm(np.array([bx, by]) - np.array([px, py]))
-        if dist < min_distance:
-            min_distance = dist
-            closest_player = player
+# دالة للحصول على اللون السائد للكائن
+def get_dominant_color(frame, box):
+    x1, y1, x2, y2 = map(int, box)
+    cropped_frame = frame[y1:y2, x1:x2]
+    cropped_frame = cv2.resize(cropped_frame, (50, 50), interpolation=cv2.INTER_AREA)  # تقليل الحجم لتحليل أسرع
+    pixels = cropped_frame.reshape(-1, 3)
+    most_common_color = Counter([tuple(pixel) for pixel in pixels]).most_common(1)
+    return most_common_color[0][0] if most_common_color else None
 
-    if closest_player:
-        px, py = get_center(closest_player)
+# --- الوظائف الأصلية ---
+# دالة لاختيار ملف الفيديو
+def browse_file():
+    global video_path, events_log
+    events_log = []
+    video_path = filedialog.askopenfilename(
+        title="Select Video File",
+        filetypes=[("Video Files", "*.mp4 *.avi *.mov *.mkv"), ("All Files", "*.*")]
+    )
+    if video_path:
+        messagebox.showinfo("File Selected", f"Selected video: {video_path}")
 
-        # Calculate the goal position (top-center of the frame)
-        goal_x, goal_y = frame.shape[1] // 2, GOAL_MARGIN_TOP
+# Helper function to display a frame in the Tkinter label
+def show_frame_in_gui(frame):
+    try:
+        max_height = 480
+        h, w = frame.shape[:2]
+        if h > max_height:
+            ratio = max_height / h
+            new_w = int(w * ratio)
+            frame = cv2.resize(frame, (new_w, max_height), interpolation=cv2.INTER_AREA)
 
-        # Count nearby defenders
-        nearby_defenders = 0
-        for other in players:
-            if other == closest_player:
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        img = Image.fromarray(frame_rgb)
+        imgtk = ImageTk.PhotoImage(image=img)
+        video_label.imgtk = imgtk
+        video_label.configure(image=imgtk)
+        root.update_idletasks()
+        root.update()
+    except Exception as e:
+        print(f"Error updating GUI frame: {e}")
+
+# دالة لتحليل الفيديو
+def analyze_video():
+    global video_path, events_log
+
+    if not video_path:
+        messagebox.showerror("Error", "No video file selected!")
+        return
+
+    events_log = []
+    try:
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            messagebox.showerror("Error", f"Unable to open video file: {video_path}")
+            return
+
+        frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+        output_filename = "output_analysis.mp4"
+        out = cv2.VideoWriter(output_filename, cv2.VideoWriter_fourcc(*'mp4v'), fps, (frame_width, frame_height))
+
+        frame_count = 0
+        skip_frames = 1  # تحليل كل إطار لتحسين الدقة
+
+        progress_bar["maximum"] = total_frames
+
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            frame_count += 1
+            progress_bar["value"] = frame_count
+            root.update_idletasks()
+
+            if frame_count % skip_frames != 0:
                 continue
-            ox, oy = get_center(other)
-            if np.linalg.norm(np.array([px, py]) - np.array([ox, oy])) < DEFENDER_RADIUS:
-                nearby_defenders += 1
 
-        # Create a scenario description
-        scenario = {
-            "player_position": (px, py),
-            "ball_position": (bx, by),
-            "goal_position": (goal_x, goal_y),
-            "nearby_defenders": nearby_defenders,
-        }
+            results = model_yolo(frame, verbose=False)
 
-        # Generate correction using Gemini
-        return generate_correction(scenario)
+            frame_events = []
+            if results and results[0].boxes is not None:
+                for box in results[0].boxes:
+                    x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                    conf = box.conf[0].item()
+                    cls = int(box.cls[0].item())
+                    label = model_yolo.names[cls]
 
-    return "No player close to the ball."
+                    confidence_threshold = 0.5
+                    if conf < confidence_threshold:
+                        continue
 
-# Function to generate a correction using Gemini
-def generate_correction(scenario):
+                    if label == "sports ball":
+                        ball_center = get_center((x1, y1, x2, y2))
+                        frame_events.append(f"Ball detected at {ball_center} (conf: {conf:.2f})")
+                        color = (0, 255, 0)
+                    elif label == "person":
+                        player_center = get_center((x1, y1, x2, y2))
+                        dominant_color = get_dominant_color(frame, (x1, y1, x2, y2))
+
+                        if is_goalkeeper((x1, y1, x2, y2), frame_width, frame_height):
+                            frame_events.append(f"Goalkeeper detected at {player_center} (color: {dominant_color})")
+                            color = (255, 255, 0)  # لون مميز للحارس
+                        else:
+                            frame_events.append(f"Player detected at {player_center} (conf: {conf:.2f})")
+                            color = (255, 0, 0)
+                    else:
+                        color = (0, 255, 255)
+
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                    cv2.putText(frame, f"{label}: {conf:.2f}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+
+            if frame_events:
+                events_log.append({"frame": frame_count, "events": frame_events})
+
+            out.write(frame)
+            show_frame_in_gui(frame)
+
+        cap.release()
+        out.release()
+        cv2.destroyAllWindows()
+
+        progress_bar["value"] = 0  # Reset progress bar
+
+    except Exception as e:
+        messagebox.showerror("Error", f"An error occurred during video analysis: {e}")
+
+# --- عرض الملخص ---
+def show_summary(summary_text):
+    summary_window = tk.Toplevel(root)
+    summary_window.title("AI Generated Summary")
+    text_widget = tk.Text(summary_window, wrap=tk.WORD, padx=10, pady=10)
+    text_widget.pack(expand=True, fill=tk.BOTH)
+    text_widget.insert(tk.END, summary_text)
+    text_widget.configure(state='disabled')
+    close_button = tk.Button(summary_window, text="Close", command=summary_window.destroy)
+    close_button.pack(pady=10)
+
+# --- طرح الأسئلة على الذكاء الاصطناعي ---
+def ask_ai_question():
+    global events_log
+    if not events_log:
+        messagebox.showinfo("No Data", "No events logged to analyze. Please analyze a video first.")
+        return
+
+    question = simpledialog.askstring("Ask AI", "What do you want to know about the match?")
+    if not question:
+        return
+
+    events_text = "\n".join(
+        [f"Frame {event['frame']}: {', '.join(event['events'])}" for event in events_log[:100]]
+    )
+
     prompt = (
-        f"A football player is in position {scenario['player_position']} with the ball at {scenario['ball_position']}. "
-        f"The goal is located at {scenario['goal_position']} and there are {scenario['nearby_defenders']} defenders nearby. "
-        f"Analyze the player's current decision and suggest a better alternative if the current decision is wrong."
+        "You are an AI assistant specializing in football video analysis. "
+        "Based on the following detected events, answer the user's question accurately and concisely.\n\n"
+        f"{events_text}\n\nQuestion: {question}\nAnswer:"
     )
 
     try:
-        response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
-        return response.text.strip()
+        model_genai = genai.GenerativeModel(GEMINI_MODEL_NAME)
+        generation_config = genai.types.GenerationConfig(max_output_tokens=300, temperature=0.4)
+        response = model_genai.generate_content(prompt, generation_config=generation_config)
+        answer = response.text.strip() if response.parts else "No answer generated."
+        show_answer(answer)
+
     except Exception as e:
-        return f"Error generating correction: {e}"
+        messagebox.showerror("Error", f"Error generating answer: {e}")
 
-# Main loop to process video frames
-while cap.isOpened():
-    ret, frame = cap.read()
-    if not ret:
-        break
+# --- عرض إجابة AI ---
+def show_answer(answer_text):
+    answer_window = tk.Toplevel(root)
+    answer_window.title("AI Answer")
+    text_widget = tk.Text(answer_window, wrap=tk.WORD, padx=10, pady=10)
+    text_widget.pack(expand=True, fill=tk.BOTH)
+    text_widget.insert(tk.END, answer_text)
+    text_widget.configure(state='disabled')
+    close_button = tk.Button(answer_window, text="Close", command=answer_window.destroy)
+    close_button.pack(pady=10)
 
-    # Perform object detection with YOLOv8
-    results = model(frame, conf=0.25)  # Lower confidence threshold for better detection
+# --- الواجهة الرسومية ---
+root = tk.Tk()
+root.title("YOLOv8 Video Analysis with AI Interaction")
+root.geometry("800x600")
 
-    ball_pos = None
-    players = []
+video_frame = tk.Frame(root)
+video_frame.pack(pady=10, padx=10, fill="both", expand=True)
+video_label = tk.Label(video_frame, text="Video will appear here after analysis starts")
+video_label.pack(fill="both", expand=True)
 
-    # Process detection results
-    for result in results:
-        boxes = result.boxes  # Get bounding boxes
-        for box in boxes:
-            x1, y1, x2, y2 = box.xyxy[0].tolist()[:4]
-            cls = int(box.cls[0].item())  # Get class index
-            label = model.names[cls]  # Get class label
+button_frame = tk.Frame(root)
+button_frame.pack(pady=10)
+btn_browse = tk.Button(button_frame, text="Browse Video", command=browse_file, width=15, height=2)
+btn_browse.pack(side=tk.LEFT, padx=10)
+btn_analyze = tk.Button(button_frame, text="Start Analysis & Summary", command=analyze_video, width=25, height=2)
+btn_analyze.pack(side=tk.LEFT, padx=10)
+btn_ask_ai = tk.Button(button_frame, text="Ask AI", command=ask_ai_question, width=15, height=2)
+btn_ask_ai.pack(side=tk.LEFT, padx=10)
 
-            if label == "person":
-                # Add player bounding box
-                players.append((x1, y1, x2, y2))
-                cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (255, 0, 0), 2)
-                cv2.putText(frame, "Player", (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+progress_bar = ttk.Progressbar(root, orient="horizontal", length=400, mode="determinate")
+progress_bar.pack(pady=10)
 
-            elif label == "sports ball":
-                # Detect ball and calculate its center
-                ball_pos = get_center((x1, y1, x2, y2))
-                cv2.circle(frame, ball_pos, 8, (0, 255, 0), -1)
-                cv2.putText(frame, "Ball", (ball_pos[0] + 10, ball_pos[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-
-    # Analyze the player's decision
-    correction = analyze_decision(ball_pos, players, frame)
-    print(f"Correction: {correction}")
-
-    # Annotate the suggestion on the frame
-    cv2.putText(frame, correction, (10, frame.shape[0] - 50), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
-
-    # Show the frame and save it to the output video
-    cv2.imshow("Football Match Analysis", frame)
-    out.write(frame)
-
-    # Break the loop if 'q' is pressed
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
-
-# Release resources
-cap.release()
-out.release()
-cv2.destroyAllWindows()
+root.mainloop()
